@@ -227,7 +227,51 @@ echo_section "Configure proxmox pve repository"
 echo "deb [arch=amd64] http://download.proxmox.com/debian/pve trixie pve-no-subscription" \
   > /etc/apt/sources.list.d/proxmox.list
 
-wget https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg -O /etc/apt/trusted.gpg.d/proxmox-archive-keyring-trixie.gpg
+base64 -d <<EOF > /etc/apt/trusted.gpg.d/proxmox-archive-keyring-trixie.gpg
+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
+EOF
+
 chmod +r /etc/apt/trusted.gpg.d/proxmox-archive-keyring-trixie.gpg
 
 echo_section "Configure a basic system environment"
@@ -237,7 +281,7 @@ apt-get install --yes locales keyboard-configuration console-setup
 echo_section "Setup locale"
 perl -i -pe 's/# (en_US.UTF-8)/\$1/' /etc/locale.gen
 echo 'LANG="en_US.UTF-8"' > /etc/default/locale
-ln -fs /usr/share/zoneinfo/Europe/Berlin /etc/localtime
+ln -fs /usr/share/zoneinfo/Europe/Moscow /etc/localtime
 locale-gen
 dpkg-reconfigure -f noninteractive tzdata keyboard-configuration console-setup debconf
 
@@ -260,7 +304,7 @@ apt-get install --no-install-recommends --yes \
   sudo \
   tree \
   tmux \
-  pve-kernel-6.2 \
+  pve-kernel-6.14 \
   pve-kernel-helper \
   zstd \
   zfsutils-linux \
