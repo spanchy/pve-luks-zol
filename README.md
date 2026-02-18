@@ -19,8 +19,7 @@ umount -lf /target/dev
 umount -lf /target/proc
 umount -lf /target/sys
 zfs umount -a
-zpool destroy bpool
-zpool destroy rpool
+zpool destroy rtank
 zpool export -a
 cryptsetup luksClose /dev/mapper/rtank0_crypt
 cryptsetup luksClose /dev/mapper/rtank1_crypt
