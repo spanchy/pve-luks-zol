@@ -59,8 +59,8 @@ echo_section "Configure live system"
 echo_section "Install ZOL and dependencies"
 if ! modinfo zfs &> /dev/null; then
 ( set -x
-  echo "deb http://mirror.yandex.ru/debian trixie contrib" \
-    > /etc/apt/sources.list.d/trixie-contrib.list
+  # i'am using linux mint, and not needed this repo. But you need GPG key for this repository.
+  #echo "deb http://mirror.yandex.ru/debian trixie main contrib" > /etc/apt/sources.list.d/trixie-sources.list
   apt-get update
   apt-get install --yes cryptsetup curl debootstrap efibootmgr gdisk dpkg-dev parted rng-tools dosfstools "linux-headers-$(uname -r)"
   apt-get install --yes zfsutils-linux
