@@ -8,6 +8,7 @@ if [[ $EUID != 0 ]]; then sudo "$0" "$@"; exit $?; fi
 # copied from: https://github.com/stackcoder/pve-zol
 
 DISK_IDS=(
+  # id from /dev/disk/by-id/
   "wwn-0x0000000000000001"
   "wwn-0x0000000000000002"
 )
@@ -19,11 +20,13 @@ CRYPTSETUP_DEFAULTS=(
   --cipher "aes-xts-plain64"
   --pbkdf "argon2id"
   --key-size "512"
+  # if you disk 4k formated
+  #--sector-size "4096"
   --hash "sha512"
   --use-random
 )
 
-SWAP_SIZE="${SWAP_SIZE:-16G}"
+SWAP_SIZE="${SWAP_SIZE:-32G}"
 ROOT_PASSWORD="root"
 
 TARGET_HOSTNAME="${TARGET_HOSTNAME:-pve-zol}"
@@ -35,7 +38,8 @@ TARGET_DNS="${TARGET_DNS:-${TARGET_GATEWAY}}"
 [[ -z "${ETHERNET_DEV:-}" ]] && ETHERNET_DEV="$(udevadm info -e | sed -n '/ID_NET_NAME_PATH=/p' | head -n1 | cut -d= -f2)"
 [[ -z "${ETHERNET_DEV:-}" ]] && ETHERNET_DEV="enp0s1"
 
-SSH_USER="user"
+SSH_USER="root"
+# insert you ssh key
 SSH_KEY=""
 
 [[ "${#DISK_IDS[@]}" -lt 2 ]] && ZPOOL_TYPE=""
@@ -55,8 +59,8 @@ echo_section "Configure live system"
 echo_section "Install ZOL and dependencies"
 if ! modinfo zfs &> /dev/null; then
 ( set -x
-  echo "deb http://deb.debian.org/debian bookworm contrib" \
-    > /etc/apt/sources.list.d/bookworm-contrib.list
+  echo "deb http://mirror.yandex.ru/debian trixie contrib" \
+    > /etc/apt/sources.list.d/trixie-contrib.list
   apt-get update
   apt-get install --yes cryptsetup curl debootstrap efibootmgr gdisk dpkg-dev parted rng-tools dosfstools "linux-headers-$(uname -r)"
   apt-get install --yes zfsutils-linux
@@ -108,7 +112,7 @@ for i in "${!DISK_IDS[@]}"; do
   echo -n "${CRYPTSETUP_PASSPHRASE}" | \
     ( set -x; cryptsetup luksFormat --verbose "${CRYPTSETUP_DEFAULTS[@]}" "/dev/disk/by-id/${DISK_IDS[$i]}-part4" )
   echo -n "${CRYPTSETUP_PASSPHRASE}" | \
-    ( set -x; cryptsetup luksOpen --verbose "/dev/disk/by-id/${DISK_IDS[$i]}-part4" "rpool${i}_crypt" )
+    ( set -x; cryptsetup luksOpen --verbose "/dev/disk/by-id/${DISK_IDS[$i]}-part4" "rtank${i}_crypt" )
 done
 
 echo_section "Create root pool"
@@ -118,53 +122,54 @@ echo_section "Create root pool"
     -O acltype=posixacl -O canmount=off -O compression=lz4 \
     -O dnodesize=auto -O normalization=formD -O relatime=on -O xattr=sa \
     -O mountpoint=/ -R /target \
-    "rpool" ${ZPOOL_TYPE} $(printf "/dev/mapper/rpool%s_crypt " "${!DISK_IDS[@]}")
+    "rtank" ${ZPOOL_TYPE} $(printf "/dev/mapper/rtank%s_crypt " "${!DISK_IDS[@]}")
 )
 
 echo_section "Create datasets"
 ( set -x
   # Create filesystem datasets to act as containers
-  zfs create -o canmount=off -o mountpoint=none rpool/ROOT
+  zfs create -o canmount=off -o mountpoint=none rtank/ROOT
 
   # Enable discard
-  zpool set autotrim=on rpool
+  zpool set autotrim=on rtank
 
   # Create a filesystem datasets for the root and boot filesystems
-  zfs create -o canmount=noauto -o mountpoint=/ rpool/ROOT/debian
-  zfs mount rpool/ROOT/debian
+  zfs create -o canmount=noauto -o mountpoint=/ rtank/ROOT/debian
+  zfs mount rtank/ROOT/debian
 
   # Create datasets
-  zfs create                                            rpool/home
-  zfs create -o mountpoint=/root                        rpool/home/root
+  zfs create                                            rtank/home
+  zfs create -o mountpoint=/root                        rtank/home/root
   chmod 700 /target/root
-  zfs create -o canmount=off                            rpool/var
-  zfs create -o canmount=off                            rpool/var/lib
-  zfs create                                            rpool/var/lib/vz
-  zfs create                                            rpool/var/log
-  zfs create                                            rpool/var/spool
+  zfs create -o canmount=off                            rtank/var
+  zfs create -o canmount=off                            rtank/var/lib
+  zfs create                                            rtank/var/lib/vz
+  zfs create                                            rtank/var/log
+  zfs create                                            rtank/var/spool
 
   # Don't do this, it will break bootctl install
-  #zfs create                                           rpool/boot
+  #zfs create                                           rtank/boot
 
   # If you wish to exclude these from snapshots:
-  zfs create -o com.sun:auto-snapshot=false             rpool/var/cache
-  zfs create -o com.sun:auto-snapshot=false             rpool/var/tmp
+  zfs create -o com.sun:auto-snapshot=false             rtank/var/cache
+  zfs create -o com.sun:auto-snapshot=false             rtank/var/tmp
   chmod 1777 /target/var/tmp
 )
 
+# fresh version zfs using big blocksize for native write (ex. 16k)
 echo_section "Create swap zvol"
 ( set -x
   zfs create \
     -V "${SWAP_SIZE}" \
-    -b "$(getconf PAGESIZE)" \
+    -b 16384 \
     -o compression=zle \
     -o primarycache=metadata \
     -o secondarycache=none \
     -o com.sun:auto-snapshot=false \
     -o logbias=throughput \
     -o sync=always \
-    rpool/swap
-  mkswap -f /dev/zvol/rpool/swap
+    rtank/swap
+  mkswap -f /dev/zvol/rtank/swap
 )
 
 echo_section "Mount a tmpfs at /run"
@@ -177,7 +182,7 @@ echo_section "Mount a tmpfs at /run"
 
 echo_section "Install minimal system"
 ( set -x
-  debootstrap --arch amd64 bookworm /target http://deb.debian.org/debian
+  debootstrap --arch amd64 trixie /target http://mirror.yandex.ru/debian
 )
 
 echo_section "Setup chroot environment"
@@ -208,45 +213,22 @@ echo "${TARGET_IPADDRESS%/*}       ${TARGET_HOSTNAME}" >> /etc/hosts
 
 echo_section "Configure package sources"
 cat <<EOF > /etc/apt/sources.list
-deb http://deb.debian.org/debian bookworm main contrib
-#deb-src http://deb.debian.org/debian bookworm main contrib
+deb http://mirror.yandex.ru/debian trixie main contrib
+#deb-src http://mirror.yandex.ru/debian trixie main contrib
 
-deb http://security.debian.org/debian-security bookworm-security main contrib
-#deb-src http://security.debian.org/debian-security bookworm-security main contrib
+deb http://mirror.yandex.ru/debian-security trixie-security main contrib
+#deb-src http://mirror.yandex.ru/debian-security trixie-security main contrib
 
-deb http://deb.debian.org/debian bookworm-updates main contrib
-#deb-src http://deb.debian.org/debian bookworm-updates main contrib
+deb http://mirror.yandex.ru/debian trixie-updates main contrib
+#deb-src http://mirror.yandex.ru/debian trixie-updates main contrib
 EOF
 
 echo_section "Configure proxmox pve repository"
-echo "deb [arch=amd64] http://download.proxmox.com/debian/pve bookworm pve-no-subscription" \
+echo "deb [arch=amd64] http://download.proxmox.com/debian/pve trixie pve-no-subscription" \
   > /etc/apt/sources.list.d/proxmox.list
 
-base64 -d <<EOF > /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
-mQINBGODZZwBEADMA2dbTBXHRkvaOApNhPSRhyuhVfImTCGrUEFMMaUZ0vrEZRf7wpG7MTVlrQ2g
-OMshieGU1Oo+Kat5z0MN3g5Q+tck/OG43NQXkoXUkfsV3fiGZ34dMyiNEYDJB3EcVnX+99OWYmhP
-2ZcY0rgkSxBFKYpwphclw0gTu7osFu8FB+xFykgiqqT5PjJryLg8ltE/srt7XTLRusMvPHdrw3OU
-F6xDIu7YsCsZ2CQu/5BlbWmbhG6Jt3Du7la6t17RFa/jhdRuRPL37VXMLnvc4hQXxsyQgP13kkKX
-zSzNwgVKcJxzAz4YeADAjtQmrnYnwRQahfiob7snTqtxdgE1pPBvSZS/1MXdjGU2nYFcuaOjXJKy
-2f8ntpjtXTkTiEDB36OF78K2E9OifrTuqliHylVrF5fPdNax993xcY/VA9DRaUp1WzQy7Aa95v25
-vfmdzRlEnlEmGKmXA0XJhUs+dy0vy+9uWwES9z9pL056FcH7NKfST/nFDwamTVWugKzhmADRSTId
-iJ4hW9CfN7gFJxHsodmqUQ80EtJvjzzmtqXMNAv6Yu4o0H/9dNXlBZP4O4yazRWmZ9hcETbaupaP
-1sPGKdbYPaeU+eGDZkbhjAnYQXlg3h87nRlQUbWw/oa2CqBA7Z4udpQoeaTfogcHHiZSBIozy/LC
-5QfPKk/gu3PYPQARAQABtDpQcm94bW94IEJvb2t3b3JtIFJlbGVhc2UgS2V5IDxwcm94bW94LXJl
-bGVhc2VAcHJveG1veC5jb20+iQJUBBMBCgA+FiEE9OE2xnzc5Brm3m/IEUCvj2OeDDkFAmODZZwC
-GwMFCRLMAwAFCwkIBwIGFQoJCAsCBBYCAwECHgECF4AACgkQEUCvj2OeDDm59w/8CCIfeNtNkrs9
-Q6WFZEd4Ot+an3UxU00M3QO74LAeLPj8wbCRG1iN3j19sv0ed6vSyLz9UX79HkiiAHta9GA15MmZ
-a6uTrABBfF8xPpDUPadpPXSAQmaUhr3NgLIB6jUVWEoBuHpxSwE3DEGgNwypTqgAr0f30mr+iCOd
-3DcwgkhfIPwWX6GBRWEn8QUjU7M7jSm9ExtLGy+sBoXsFc4h8I2Q9Yrfe85oRZIHCRKsc1o8Tuxv
-CB3YPntOSZJUVjV+o8PzTTjWhCjuY+OMKyiiOgbfrtsRhB4PzQ6ZG8655Q+QjAy9+boN0OO/lzRb
-/Jpup6zpOvOIWGouvZ77FtCquPzwBiOvxHm7wE2TTVTE48DJDdmzKNFaXf1DQMHATHLEiU4iI6Ko
-Bw+MYPCKSauas77dw4Ftm6jQA+BjtulzBMLT4nq65oQ8lAB7ukBHCYrI1qQIoGq0c3VuYcO36uW9
-kRI9InNSM6jymeZJ+SvrREvh+Izzwm1zf+oWtrw2cyFFF5pCtuaB3i2B1L0tPxi9NWEF7d3e43bk
-g10TK19Ea0UqgdnMdCHFvHDFz+BALuYbTFey1WjOXavOEVfWkC0fpyGjFiMNWUp6FGrxfnOiG25h
-ln+eCWWiWzcTgVJ67mqm2XbzSMa8Z+7u6L+BTa8P7OZmuPyCjzIJtE1E1CXH+/o=
-EOF
-
-chmod +r /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
+wget https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg -O /etc/apt/trusted.gpg.d/proxmox-archive-keyring-trixie.gpg
+chmod +r /etc/apt/trusted.gpg.d/proxmox-archive-keyring-trixie.gpg
 
 echo_section "Configure a basic system environment"
 apt-get update
@@ -288,7 +270,7 @@ apt-get install --no-install-recommends --yes \
 echo_section "Configure crypttab"
 for i in "\${!DISK_IDS[@]}"; do
   uuid=\$(blkid -s UUID -o value "/dev/disk/by-id/\${DISK_IDS[\$i]}-part4")
-  line="rpool\${i}_crypt UUID=\${uuid} system_crypt luks,initramfs,keyscript=decrypt_keyctl"
+  line="rtank\${i}_crypt UUID=\${uuid} system_crypt luks,initramfs,keyscript=decrypt_keyctl"
   if [[ \$(lsblk -dnro rota "/dev/disk/by-id/\${DISK_IDS[\$i]}") == "0" ]]; then
     # device is a non rotational device (aka. SSD)
     line="\${line},discard"
@@ -297,7 +279,7 @@ for i in "\${!DISK_IDS[@]}"; do
 done
 
 echo_section "Configure swap"
-echo "/dev/zvol/rpool/swap none swap discard 0 0" >> /etc/fstab
+echo "/dev/zvol/rtank/swap none swap discard 0 0" >> /etc/fstab
 echo "RESUME=none" > /etc/initramfs-tools/conf.d/resume
 
 echo_section "Refresh initramfs"
@@ -306,7 +288,7 @@ update-initramfs -c -k all
 echo_section "Install bootloader"
 
 # https://github.com/proxmox/pve-installer/blob/435522c9d174f6ef9ca06bb262ff1b418de987ff/proxinstall#L1784
-ZFS_SNIPPET="luks.crypttab=no root=ZFS=rpool/ROOT/debian"
+ZFS_SNIPPET="luks.crypttab=no root=ZFS=rtank/ROOT/debian"
 if [ -d /sys/firmware/efi ]; then
   apt install --no-install-recommends --yes systemd-boot efibootmgr
   echo "\$ZFS_SNIPPET" > /etc/kernel/cmdline
@@ -330,7 +312,7 @@ proxmox-boot-tool status
 echo_section "Fix filesystem mount ordering"
 
 mkdir /etc/zfs/zfs-list.cache
-touch /etc/zfs/zfs-list.cache/rpool
+touch /etc/zfs/zfs-list.cache/rtank
 [[ ! -e /etc/zfs/zed.d/history_event-zfs-list-cacher.sh ]] && \
   ln -s /usr/lib/zfs-linux/zed.d/history_event-zfs-list-cacher.sh /etc/zfs/zed.d
 
@@ -338,12 +320,12 @@ zed -F &
 ZED_PID=\$!
 
 # Loop while zed does its thing
-while ! ( [ -f /etc/zfs/zfs-list.cache/rpool ] && \
-          [ -s /etc/zfs/zfs-list.cache/rpool ] )
+while ! ( [ -f /etc/zfs/zfs-list.cache/rtank ] && \
+          [ -s /etc/zfs/zfs-list.cache/rtank ] )
 do
   sleep 3
   # If it is empty, force a cache update and check again:
-  zfs set canmount=noauto rpool/ROOT/debian
+  zfs set canmount=noauto rtank/ROOT/debian
 done
 
 # Delay one more time to avoid race condition
@@ -351,7 +333,7 @@ sleep 3
 kill \$ZED_PID
 
 # Fix paths to eliminate /target:
-sed -Ei "s|/target/?|/|" /etc/zfs/zfs-list.cache/rpool
+sed -Ei "s|/target/?|/|" /etc/zfs/zfs-list.cache/rtank
 
 echo_section "Tasksel"
 tasksel install standard
@@ -391,7 +373,7 @@ echo_section "Self delete chroot commands script"
 rm "\${0}"
 
 echo_section "Snapshot initial installation"
-zfs snapshot rpool/ROOT/debian@install
+zfs snapshot rtank/ROOT/debian@install
 END_OF_CHROOT
 
 echo_section "Run generated chroot script"
@@ -423,7 +405,7 @@ fi
   systemctl stop udev
   zpool export -a
   for i in "${!DISK_IDS[@]}"; do
-    cryptsetup luksClose "rpool${i}_crypt"
+    cryptsetup luksClose "rtank${i}_crypt"
   done
   sync
 )
