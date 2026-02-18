@@ -22,8 +22,8 @@ zfs umount -a
 zpool destroy bpool
 zpool destroy rpool
 zpool export -a
-cryptsetup luksClose /dev/mapper/rpool0_crypt
-cryptsetup luksClose /dev/mapper/rpool1_crypt
+cryptsetup luksClose /dev/mapper/rtank0_crypt
+cryptsetup luksClose /dev/mapper/rtank1_crypt
 ```
 
 ## Inspired by 
