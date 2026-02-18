@@ -3,11 +3,10 @@ PVE-ZOL
 Install Proxmox PVE with cryptsetup on ZFS.
 
 1. Download and boot [debian live install image](https://www.debian.org/CD/live/)
-2. Install req package `debootstrap` (need for Linux Mint, ex.)
-3. Change variables in the installer script `install-pve-zol.sh`
-4. Copy installer script to the live system
-5. Execute installer script
-6. Reboot system twice
+2. Change variables in the installer script `install-pve-zol.sh`
+3. Copy installer script to the live system
+4. Execute installer script
+5. Reboot system twice
 
 ## Reset system during development
 ```bash
